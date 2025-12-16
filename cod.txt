@@ -1,0 +1,310 @@
+FUNCTION_BLOCK FB_MasinaPrincipala
+VAR_INPUT
+    xStart           : BOOL;
+    xStop            : BOOL;
+    xReset           : BOOL;
+    xEStop           : BOOL;
+    xHold            : BOOL;
+    tVitezaBanda     : TIME := T#1.5S;
+END_VAR
+
+VAR_OUTPUT
+    // Actuatoare
+    Q_Motor             : BOOL;
+	Q_ValvaApa          : BOOL;
+    Q_ValvaSuc          : BOOL;
+    Q_PistonDopuire     : BOOL;
+    Q_PistonRejectie    : BOOL;
+    Q_PistonSortareMici : BOOL;
+    
+    // Contoare 
+    iRebuturi        : DINT;
+    iSticleApa       : DINT;
+    iSticleSuc       : DINT;
+	
+	// Status
+	sStatus : STRING;
+	aCulori : ARRAY [0..31] OF DWORD; 
+END_VAR
+
+VAR
+    // --- Variabile Interne & HMI ---
+    eStare           : E_Stare;
+	xMasinaActiva: BOOL;
+	xActuatoareEnable: BOOL;
+
+    // Registri Shiftare
+    dwPrezenta       : DWORD;
+    dwTipSticla      : DWORD;
+    dwDefect         : DWORD;
+    
+    // Timere
+    tonPuls          : TON;
+    xPuls            : BOOL;
+    xSistemOcupat    : BOOL;
+    
+    tpUmplereApa     : TP;
+    tpUmplereSuc     : TP;
+    tpDopuire        : TP;
+    tpRejectie       : TP;
+    tpSortare        : TP;
+	tonInitializare  : TON;
+    
+    // Triggere
+    trigUmplereApa   : F_TRIG ; 
+    trigUmplereSuc   : F_TRIG; 
+    trigRejectie     : F_TRIG; 
+    trigSortare      : F_TRIG; 
+    
+    // Random
+    dicePrezenta     : FB_Random;
+    diceTip          : FB_Random;
+    diceDefect       : FB_Random;
+    
+    i                : INT;
+    
+    // Constante Culori
+    c_ALB_GOL        : DWORD := 16#FFFFFFFF; 
+    c_GRI_STICLA     : DWORD := 16#FFC0C0C0; 
+    c_ALBASTRU_APA   : DWORD := 16#FF00FFFF; 
+    c_ORANGE_SUC     : DWORD := 16#FFFF8000; 
+    c_ROSU_DEFECT    : DWORD := 16#FFFF0000; 
+	
+END_VAR
+
+dicePrezenta(iSansa := 80);
+diceTip(iSansa := 50);
+diceDefect(iSansa :=20);
+
+// 1. SIGURANTA
+IF xEStop THEN
+    eStare := E_Stare.ERROR;
+    Q_Motor:= FALSE; Q_ValvaApa := FALSE; Q_ValvaSuc := FALSE; Q_PistonDopuire := FALSE; Q_PistonRejectie := FALSE; Q_PistonSortareMici := FALSE;
+    // Resetare memorie sticle
+    dwPrezenta  := 0;
+    dwTipSticla := 0;
+    dwDefect    := 0;
+END_IF
+
+IF xHold AND (eStare = E_Stare.RUNNING OR eStare = E_Stare.STOPPING) THEN
+    eStare := E_Stare.HOLD;
+END_IF
+
+// 2. STATE MACHINE
+CASE eStare OF
+    
+    E_Stare.ERROR:
+        sStatus := 'EROARE - RESETATI MASINA';
+        Q_Motor := FALSE; Q_ValvaApa := FALSE; Q_ValvaSuc := FALSE; Q_PistonDopuire := FALSE; Q_PistonRejectie := FALSE; Q_PistonSortareMici := FALSE;
+		tonInitializare(IN := FALSE);
+        IF xReset AND NOT xEStop THEN eStare := E_Stare.INIT; END_IF
+        
+    E_Stare.INIT:
+        sStatus := 'INITIALIZARE';
+        dwPrezenta  := 0; iSticleApa := 0;
+        dwTipSticla := 0; iSticleSuc := 0;
+        dwDefect    := 0; iRebuturi  := 0;
+        Q_Motor := FALSE; Q_ValvaApa := FALSE; Q_ValvaSuc := FALSE; Q_PistonDopuire := FALSE; Q_PistonRejectie := FALSE; Q_PistonSortareMici := FALSE;
+        tonInitializare(IN := TRUE, PT := T#2S);
+        IF tonInitializare.Q THEN eStare := E_Stare.READY; tonInitializare(IN := FALSE); END_IF
+
+    E_Stare.READY:
+        sStatus := 'IN PARAMETRI - APASATI START';
+        IF xStart THEN eStare := E_Stare.RUNNING; END_IF
+        
+    E_Stare.HOLD:
+        sStatus := 'IN PAUZA';
+        IF NOT xHold THEN 
+             IF dwPrezenta > 0 THEN eStare := E_Stare.RUNNING; ELSE eStare := E_Stare.READY; END_IF
+        END_IF
+        
+    E_Stare.RUNNING:
+        sStatus := 'IN FUNCTIUNE';
+        IF xStop THEN eStare := E_Stare.STOPPING; END_IF
+        
+    E_Stare.STOPPING:
+        sStatus := 'OPRIRE - GOLIRE BANDA...';
+        IF dwPrezenta = 0 AND NOT xSistemOcupat THEN 
+            eStare := E_Stare.READY; 
+        END_IF
+END_CASE
+
+
+// 3. GENERATOR PULS
+xSistemOcupat := Q_ValvaApa OR Q_ValvaSuc OR Q_PistonDopuire;
+xMasinaActiva := (eStare = E_Stare.RUNNING) OR (eStare = E_Stare.STOPPING);
+
+tonPuls(IN := xMasinaActiva AND NOT xSistemOcupat , 
+        PT := tVitezaBanda,
+        Q => xPuls);
+        
+IF tonPuls.Q THEN tonPuls(IN := FALSE); END_IF // resetare timer tonPuls
+
+
+// 4. LOGICA SECVENTIALA
+
+IF xPuls THEN
+    IF dwPrezenta.31 THEN iSticleApa := iSticleApa + 1; END_IF // contor sticle apa
+    
+    FOR i := 31 TO 1 BY -1 DO
+        aCulori[i] := aCulori[i-1]; // shiftare cod culori pentru afisare
+    END_FOR
+    
+    dwPrezenta  := SHL(dwPrezenta, 1);
+    dwTipSticla := SHL(dwTipSticla, 1);
+    dwDefect    := SHL(dwDefect, 1);
+    
+    // Intrare Banda : simulare prezenta + tip sticla
+    IF (eStare = E_Stare.RUNNING) THEN
+        dicePrezenta(IN := TRUE, Q=>dwPrezenta.0);
+    ELSE 
+        dwPrezenta.0 := FALSE; // Nu mai intra nimic
+    END_IF
+    
+    IF dwPrezenta.0 THEN 
+        aCulori[0]   := c_GRI_STICLA;
+        diceTip(IN := TRUE, Q=> dwTipSticla.0);
+    ELSE 
+        aCulori[0] := c_ALB_GOL; 
+    END_IF
+    
+    // D. Inspectie : simulare defect
+    IF dwPrezenta.5 THEN
+        diceDefect(IN := TRUE, Q => dwDefect.5);
+        IF dwDefect.5 THEN aCulori[5] := c_ROSU_DEFECT; END_IF
+    END_IF
+
+    dicePrezenta(IN := FALSE);
+    diceTip(IN := FALSE);
+    diceDefect(IN := FALSE);
+END_IF
+
+
+// 5. ACTUATOARE 
+
+xActuatoareEnable := (eStare = E_Stare.RUNNING OR eStare = E_Stare.STOPPING);
+
+
+// --- UMPLERE APA (Poz 10) ---
+tpUmplereApa(IN := xActuatoareEnable 
+                   AND dwPrezenta.10 
+                   AND NOT dwDefect.10 
+                   AND dwTipSticla.10
+                   AND NOT xPuls,  
+                 PT := T#1S,
+                 Q => Q_ValvaApa);
+ 
+trigUmplereApa(CLK := Q_ValvaApa); IF trigUmplereApa.Q THEN aCulori[10] := c_ALBASTRU_APA; END_IF // actualizare afisare
+
+
+// --- UMPLERE SUC (Poz 10) ---
+tpUmplereSuc(IN := xActuatoareEnable 
+                   AND dwPrezenta.10 
+                   AND NOT dwDefect.10 
+                   AND NOT dwTipSticla.10
+                   AND NOT xPuls, 
+                 PT := T#2S,
+                 Q => Q_ValvaSuc);
+              
+trigUmplereSuc(CLK := Q_ValvaSuc); IF trigUmplereSuc.Q THEN aCulori[10] := c_ORANGE_SUC; END_IF // actualizare afisare
+
+
+// --- DOPUIRE (Poz 15) ---
+tpDopuire(IN := xActuatoareEnable AND dwPrezenta.15 AND NOT dwDefect.15 AND NOT xPuls, 
+          PT := T#0.5S,
+          Q => Q_PistonDopuire);
+
+// --- REJECTIE (Poz 20) ---
+tpRejectie(IN := xActuatoareEnable AND dwPrezenta.20 AND dwDefect.20 AND NOT xPuls, 
+           PT := T#0.5S,
+           Q => Q_PistonRejectie);
+
+trigRejectie(CLK := Q_PistonRejectie); 
+IF trigRejectie.Q THEN 
+    iRebuturi := iRebuturi + 1; 
+    aCulori[20]   := c_ALB_GOL; 
+    dwPrezenta.20 := FALSE;      
+    dwDefect.20   := FALSE;
+END_IF
+
+
+// --- SORTARE (Poz 25) ---
+tpSortare(IN := xActuatoareEnable AND dwPrezenta.25 AND NOT dwTipSticla.25 AND NOT xPuls, 
+          PT := T#0.5S,
+          Q => Q_PistonSortareMici);
+
+trigSortare(CLK := Q_PistonSortareMici); 
+IF trigSortare.Q THEN
+    iSticleSuc := iSticleSuc + 1; 
+    aCulori[25]   := c_ALB_GOL;
+    dwPrezenta.25 := FALSE;      
+END_IF
+
+// 6. IESIRE MOTOR
+Q_Motor := xActuatoareEnable AND NOT xHold AND NOT xSistemOcupat AND NOT xEStop;
+
+
+PROGRAM PLC_PRG
+VAR
+    // 1. INSTANTA MASINII
+    Masina : FB_MasinaPrincipala;
+    
+    // 2. VARIABILE DE COMANDA (HMI INPUTS)
+    xHMI_Start    : BOOL;
+    xHMI_Stop     : BOOL;
+    xHMI_Reset    : BOOL;
+    xHMI_EStop    : BOOL; // Switch (Ramane activ)
+    xHMI_Hold     : BOOL; // Switch (Ramane activ)
+    
+    // Slider Viteza
+    iSliderViteza : INT := 50;  // Default la mijloc
+    tTimpCalculat : TIME;
+    
+    // 3. VARIABILE DE STATUS (HMI OUTPUTS)
+    HMI_Status       : STRING;
+    
+    iHMI_Rebuturi    : DINT;
+    iHMI_Apa         : DINT;
+    iHMI_Suc         : DINT;
+    
+	xHMI_ValvaApa    : BOOL;
+    xHMI_ValvaSuc    : BOOL;
+    xHMI_PistonDop   : BOOL;
+    xHMI_PistonRej   : BOOL;
+    xHMI_PistonSort  : BOOL; 	
+	
+    aHMI_Culori      : ARRAY[0..31] OF DWORD;
+	xHMI_MotorOn: BOOL;
+END_VAR
+
+// 1. LOGICA SLIDER (VITEZA)
+IF iSliderViteza < 1 THEN iSliderViteza := 1; END_IF
+IF iSliderViteza > 100 THEN iSliderViteza := 100; END_IF
+
+// Calculam viteza inainte sa chemam masina
+tTimpCalculat := UDINT_TO_TIME(2000 - (INT_TO_UDINT(iSliderViteza) * 18));
+
+// 2. APELAREA BLOCULUI FUNCTIONAL (MAIN CALL)
+Masina(
+    xStart := xHMI_Start,	
+    xStop  := xHMI_Stop,
+    xReset := xHMI_Reset,
+    xHold  := xHMI_Hold,
+    xEStop := xHMI_EStop,
+    tVitezaBanda := tTimpCalculat
+);
+
+// Status General & Contoare
+HMI_Status    := Masina.sStatus;
+iHMI_Apa      := Masina.iSticleApa;
+iHMI_Suc      := Masina.iSticleSuc;
+iHMI_Rebuturi := Masina.iRebuturi;
+aHMI_Culori   := Masina.aCulori;
+
+// Actuatoare (Feedback vizual)
+xHMI_MotorOn    := Masina.Q_Motor;             // Banda ruleaza
+xHMI_ValvaApa   := Masina.Q_ValvaApa;          // Se toarna apa
+xHMI_ValvaSuc   := Masina.Q_ValvaSuc;          // Se toarna suc
+xHMI_PistonDop  := Masina.Q_PistonDopuire;     // Pistonul de dopuire e jos
+xHMI_PistonRej  := Masina.Q_PistonRejectie;    // Pistonul de rebut impinge
+xHMI_PistonSort := Masina.Q_PistonSortareMici; // Pistonul de sortare impinge
