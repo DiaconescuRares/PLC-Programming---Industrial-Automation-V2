@@ -2,10 +2,11 @@
 
 A comprehensive simulation of an industrial bottling line control system, developed in **Structured Text (ST)** according to **IEC 61131-3** standards.
 
-This project simulates a complete production cycle including bottle generation, filling (Water/Juice), capping, quality inspection, defect rejection, and sorting.
+![Project Demo](https://imgur.com/a/4xIkvfX.gif)
 
-![Project Demo](path_to_your_gif_or_screenshot.gif) 
-*(Replace this line with a link to your screenshot or the video/GIF you created)*
+### 📺 [Watch the Full Presentation on YouTube](https://youtu.be/M52Y_MFmcZU)
+
+---
 
 ## 🚀 Overview
 
@@ -23,12 +24,13 @@ The system controls a conveyor belt that processes bottles through multiple stat
 
 This project implements advanced PLC programming concepts:
 
-* **Finite State Machine (FSM):** Structured management of machine states (`INIT`, `READY`, `RUNNING`, `HOLD`, `STOPPING`, `ERROR`).
-* **Bitwise Operations & Shift Registers:** Efficient tracking of bottle position and data (`DWORD` shifting) instead of resource-heavy arrays.
-* **Linear Congruential Generator (LCG):** Custom mathematical algorithm to ensure true pseudo-random distribution of bottle types and defects, independent of the PLC cycle time.
-* **Modular Programming:** Encapsulation of logic within Function Blocks (FB).
-* **IEC Timers (TON/TP):** Precise timing for filling valves and pneumatic pistons.
-* **HMI Data Binding:** Dynamic visualization using color mapping (`SEL` logic) and status feedback.
+* **Finite State Machine (FSM)** – Structured management of states (`INIT`, `READY`, `RUNNING`, `HOLD`, `STOPPING`, `ERROR`).
+* **Shift Registers & Bitwise Operations** – Efficient tracking of bottle position and data (`DWORD` shifting).
+* **Pseudo-Random Number Generation (LCG)** – Custom mathematical algorithm ensuring uniform distribution independent of cycle time.
+* **Modular Programming** – Encapsulation logic within Function Blocks (`FB_Masina`).
+* **IEC Timers (TON, TP) & Edge Detection** – Precise timing for actuators.
+* **Safety Interlocks & Priority Logic** – Handling critical safety signals.
+* **HMI Data Binding & Dynamic Coloring** – Visual feedback using `SEL` logic and HEX color codes.
 
 ## 🕹️ Controls & Logic
 
@@ -41,29 +43,13 @@ This project implements advanced PLC programming concepts:
 | **RESET** | System Reset. | Re-initializes counters and state after an Error. |
 | **Slider** | Speed Adj. | Modifies the `PT` (Pulse Time) of the main clock. |
 
-## 🛠️ Simulation Logic
-
-The simulation uses a mathematically generated random seed to create inputs:
-* **Bottle Presence:** 60% chance.
-* **Type:** 50% Water / 50% Juice.
-* **Defect Rate:** ~20%.
-
-**Process Flow:**
-1.  **Generation:** Bottles enter the shift register.
-2.  **Filling:** * Water: 1000ms (Valve 1).
-    * Juice: 2000ms (Valve 2).
-3.  **Capping:** Piston activation.
-4.  **Inspection:** Red bottles (Defects) are rejected.
-5.  **Sorting:** Juice bottles are pushed to a secondary lane.
-
 ## 💻 How to Run
 
-1.  Open the project in an IEC 61131-3 compatible IDE (e.g., **CODESYS**, **TwinCAT**, or **eCockpit**).
-2.  Import the `.export` or project files.
+1.  Open the project in an IEC 61131-3 compatible IDE (e.g., **CODESYS** or **TwinCAT**).
+2.  Import the project files.
 3.  Compile and Login to the Simulation Device.
-4.  Open the **Visualization** tab (`PLC_PRG` mapping).
+4.  Open the **Visualization** tab.
 5.  Press **START**.
 
-## 📝 License
-
-This project is open-source and available for educational purposes.
+---
+*Created with Structured Text (ST).*
