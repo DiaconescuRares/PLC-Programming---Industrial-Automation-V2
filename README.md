@@ -61,4 +61,4 @@ This project was built to demonstrate proficiency in:
 5.  Press **START**.
 
 ---
-*Created by [Your Name]*
+*Created by Diaconescu Rares Theodor*
